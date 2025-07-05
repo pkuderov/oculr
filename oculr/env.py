@@ -16,6 +16,7 @@ class ImageEnvironment(VectorEnv):
             is_eval=False, img_buffer_fn=ImageBuffer
     ):
         super().__init__()
+        self.rng = np.random.default_rng(seed)
         self.n_classes = ds.n_classes
         self.max_time_steps = max_time_steps
         self.num_envs = self.bsz = num_envs
@@ -50,13 +51,7 @@ class ImageEnvironment(VectorEnv):
         self._tar = np.empty(self.bsz, dtype=int)
         self._done_mask = None
 
-    def _sample_pos(self, n):
-        return self.rng.integers(*self.pos_range, (n, 2))
-
-    def _get_obs(self, img, pos):
-        return get_obs(img, self.img_chw_shape, self.obs_chw_shape, pos)
-
-    def reset(self):
+    def reset(self, **kwargs):
         self._step = np.zeros(self.bsz, dtype=int)
         self._ixs[:], self._img[:], self._th[:], self._tar[:] = self.data.sample(self.bsz)
 
@@ -70,30 +65,26 @@ class ImageEnvironment(VectorEnv):
 
         return (oh_pos, obs), {}
 
-    @staticmethod
-    def _split_what_action(action, reset_mask):
-        a = action.copy()
-        a[reset_mask] = -1
-        # zoom_mask, move_mask, guess_mask
-        return a == 0, a == 1, a == 2
-
     def step(self, action):
         # action: (BSZ, 4): what(zoom out|move|answer), n_classes, n_H_pos, n_W_pos
         assert action.shape == (self.bsz, 4)
         zma = action[..., 0]
-        # move_action =
 
-        # for resetting items last selected action is ignored (since it's done from the terminal/truncated state)
+        # for resetting items the last selected action is ignored
+        # (since it's done from the terminal/truncated state)
         reset_mask = self._done_mask
         n_reset = np.count_nonzero(reset_mask)
 
         self._step += 1
         if n_reset > 0:
+            # reset what is resetting
             self._step[reset_mask] = 0
-            self._ixs[reset_mask], self._img[reset_mask], self._th[reset_mask], self._tar[
-                reset_mask] = self.data.sample(n_reset)
+            (
+                self._ixs[reset_mask], self._img[reset_mask],
+                self._th[reset_mask], self._tar[reset_mask]
+            ) = self.data.sample(n_reset)
 
-        # all three mask have resetting items excluded
+        # NB: all three masks have resetting items excluded
         zoom_mask, move_mask, answer_mask = self._split_what_action(zma, reset_mask)
 
         # resetting do not interfere with both flags
@@ -101,35 +92,40 @@ class ImageEnvironment(VectorEnv):
         terminated = answer_mask
         done_mask = np.logical_or(terminated, truncated)
         self._done_mask = done_mask
+
         n_done = np.count_nonzero(done_mask)
         ep_len_sum = 0 if n_done == 0 else self._step[done_mask].sum()
 
         # 1. Handle guessing
         #   fill with default step penalty
         reward = np.full(self.bsz, self.step_reward)
-        #   fill asnwered with default incorrect ans reward
+        #   fill resetting items if needed
+        if n_reset > 0:
+            reward[reset_mask] = 0.0
+        #   fill answered with the default "incorrect answer" reward
         reward[answer_mask] = self.answer_reward[1]
         #   fill correct answers
         correct_mask = np.logical_and(answer_mask, action[..., 1] == self._tar)
         reward[correct_mask] = self.answer_reward[0]
         n_correct = 0 if n_done == 0 else np.count_nonzero(correct_mask)
-        #   fill resetting items if needed
-        if n_reset > 0:
-            reward[reset_mask] = 0.0
 
         # 2. Handle moving. NB: resetting items inherit old pos from prev episode,
-        #    but it's ok since new pos should be chosen before being exposed to agent
+        #    but it's ok since new pos should be selected before being exposed to agent
         self._pos[move_mask] = action[..., 2:][move_mask]
 
+        # what to show: patch or zoomed-out-image (aka thumbnail)
         thumbnail_mask = np.logical_or(zoom_mask, reset_mask)
-        obs_mask = np.logical_not(thumbnail_mask)
+        patch_mask = np.logical_not(thumbnail_mask)
 
+        # encode position (+ is zoomed out mask)
         oh_pos = to_one_hot_pos(self._pos, self.pos_range, thumbnail_mask)
+
+        # fill observation
         obs = np.empty((self.bsz, self.obs_size), float)
         obs[thumbnail_mask] = self._th[thumbnail_mask]
-        obs[obs_mask] = self._get_obs(self._img[obs_mask], self._pos[obs_mask])
+        obs[patch_mask] = self._get_obs(self._img[patch_mask], self._pos[patch_mask])
 
-        # careful: return only copied data
+        # careful: return only copied data (to avoid mutation problems)
         return (
             (oh_pos, obs),
             reward, terminated, truncated,
@@ -141,6 +137,19 @@ class ImageEnvironment(VectorEnv):
                 n_correct=n_correct,
             )
         )
+
+    def _sample_pos(self, n):
+        return self.rng.integers(*self.pos_range, (n, 2))
+
+    def _get_obs(self, img, pos):
+        return get_obs(img, self.img_chw_shape, self.obs_chw_shape, pos)
+
+    @staticmethod
+    def _split_what_action(action, reset_mask):
+        a = action.copy()
+        a[reset_mask] = -1
+        # zoom_mask, move_mask, guess_mask
+        return a == 0, a == 1, a == 2
 
 
 def test_env():

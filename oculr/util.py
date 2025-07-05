@@ -2,6 +2,10 @@ import numpy as np
 from numba import jit
 
 
+def ensure_2d(shape):
+    return (shape, shape) if isinstance(shape, int) else shape
+
+
 def get_pos_range(orig_chw_shape, obs_hw_shape):
     """Get an allowed range of the top left corner positions."""
     c, h, w = orig_chw_shape
@@ -118,7 +122,3 @@ def test_env_helpers():
 
 if __name__ == '__main__':
     test_env_helpers()
-
-
-def ensure_2d(shape):
-    return (shape, shape) if isinstance(shape, int) else shape

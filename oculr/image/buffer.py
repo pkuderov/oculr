@@ -1,8 +1,7 @@
 import numpy as np
 
-from oculr.dataset import Dataset
-from oculr.image.resize import resize_image_nn, _ensure_2d
-from oculr.util import _get_obs_shape
+from oculr.image.resize import resize_image_nn
+from oculr.util import ensure_2d
 
 
 class ImageBuffer:
@@ -70,16 +69,19 @@ class PrefetchedImageBuffer(ImageBuffer):
 
 
 def test_env_buffers():
+    from oculr.util import get_obs_shape
+    from oculr.dataset import Dataset
+
     seed = 8041990
     ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
     img_buffer = ImageBuffer(
         ds.train.images, ds.train.targets, img_chw_shape=ds.image_shape,
-        obs_chw_shape=_get_obs_shape(ds.image_shape, _ensure_2d(12))
+        obs_chw_shape=get_obs_shape(ds.image_shape, ensure_2d(12))
     )
     _ = img_buffer.sample(1)
     pref_img_buffer = PrefetchedImageBuffer(
         ds.train.images, ds.train.targets, img_chw_shape=ds.image_shape,
-        obs_chw_shape=_get_obs_shape(ds.image_shape, _ensure_2d(12)), prefetch_size=32
+        obs_chw_shape=get_obs_shape(ds.image_shape, ensure_2d(12)), prefetch_size=32
     )
     _ = pref_img_buffer.sample(1)
 

@@ -1,12 +1,7 @@
 import numpy as np
-from matplotlib import pyplot as plt
 from numpy.lib.stride_tricks import sliding_window_view
 
-from oculr.dataset import Dataset, to_plottable
-
-
-def _ensure_2d(shape):
-    return (shape, shape) if isinstance(shape, int) else shape
+from oculr.util import ensure_2d
 
 
 def _support_flatten(func):
@@ -21,7 +16,7 @@ def _support_flatten(func):
 @_support_flatten
 def resize_image_nn(image, new_shape):
     C, H, W = image.shape[-3:]
-    new_H, new_W = _ensure_2d(new_shape)
+    new_H, new_W = ensure_2d(new_shape)
 
     # Compute scale factors
     row_idx = (np.arange(new_H) * (H / new_H)).astype(np.int32)
@@ -35,7 +30,7 @@ def resize_image_nn(image, new_shape):
 @_support_flatten
 def resize_image_bilinear(image, new_shape):
     C, H, W = image.shape[-3:]
-    new_H, new_W = _ensure_2d(new_shape)
+    new_H, new_W = ensure_2d(new_shape)
 
     # Compute scale factors
     row_idx = np.linspace(0, H - 1, new_H)
@@ -80,7 +75,7 @@ def resize_image_gaussian(imgs, new_shape, sigma_scale: float = 0.5):
     """
     # 1) unpack shapes & sanity check
     C, H, W = imgs.shape[-3:]
-    new_h, new_w = _ensure_2d(new_shape)
+    new_h, new_w = ensure_2d(new_shape)
 
     assert new_h <= H and new_w <= W, "Only downsampling (new_h <= H, new_w <= W) is supported."
 
@@ -155,6 +150,9 @@ def resize_image_gaussian(imgs, new_shape, sigma_scale: float = 0.5):
 
 
 def test_image_resize():
+    from matplotlib import pyplot as plt
+    from oculr.dataset import Dataset, to_plottable
+
     seed = 8041990
     ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
 

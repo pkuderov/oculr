@@ -2,13 +2,11 @@ from functools import partial
 
 import numpy as np
 from gymnasium.vector import VectorEnv
-from matplotlib import pyplot as plt
 
 from oculr.dataset import Dataset, to_plottable
 from oculr.image.buffer import ImageBuffer, PrefetchedImageBuffer
-from oculr.image.resize import _ensure_2d
 from oculr.timer import timer
-from oculr.util import _get_obs_shape, _get_pos_range, _get_obs, _to_one_hot_pos
+from oculr.util import get_obs_shape, get_pos_range, get_obs, to_one_hot_pos, ensure_2d
 
 
 class ImageEnvironment(VectorEnv):
@@ -27,9 +25,9 @@ class ImageEnvironment(VectorEnv):
         self.answer_reward = answer_reward
 
         self.img_chw_shape = ds.image_shape
-        self.obs_hw_shape = _ensure_2d(obs_hw_shape)
-        self.obs_chw_shape = _get_obs_shape(self.img_chw_shape, self.obs_hw_shape)
-        self.pos_range = _get_pos_range(self.img_chw_shape, self.obs_hw_shape)
+        self.obs_hw_shape = ensure_2d(obs_hw_shape)
+        self.obs_chw_shape = get_obs_shape(self.img_chw_shape, self.obs_hw_shape)
+        self.pos_range = get_pos_range(self.img_chw_shape, self.obs_hw_shape)
 
         # total obs vector: <is zoomed out + flatten position 2-hot> + <flatten obs image chw>
         self.obs_size = np.prod(self.obs_chw_shape)
@@ -56,7 +54,7 @@ class ImageEnvironment(VectorEnv):
         return self.rng.integers(*self.pos_range, (n, 2))
 
     def _get_obs(self, img, pos):
-        return _get_obs(img, self.img_chw_shape, self.obs_chw_shape, pos)
+        return get_obs(img, self.img_chw_shape, self.obs_chw_shape, pos)
 
     def reset(self):
         self._step = np.zeros(self.bsz, dtype=int)
@@ -67,7 +65,7 @@ class ImageEnvironment(VectorEnv):
         self._pos = np.zeros((self.bsz, 2), dtype=int)
         self._done_mask = np.zeros(self.bsz, dtype=bool)
 
-        oh_pos = _to_one_hot_pos(self._pos, self.pos_range, is_hidden=self._done_mask)
+        oh_pos = to_one_hot_pos(self._pos, self.pos_range, is_hidden=self._done_mask)
         obs = self._th.copy()
 
         return (oh_pos, obs), {}
@@ -126,7 +124,7 @@ class ImageEnvironment(VectorEnv):
         thumbnail_mask = np.logical_or(zoom_mask, reset_mask)
         obs_mask = np.logical_not(thumbnail_mask)
 
-        oh_pos = _to_one_hot_pos(self._pos, self.pos_range, thumbnail_mask)
+        oh_pos = to_one_hot_pos(self._pos, self.pos_range, thumbnail_mask)
         obs = np.empty((self.bsz, self.obs_size), float)
         obs[thumbnail_mask] = self._th[thumbnail_mask]
         obs[obs_mask] = self._get_obs(self._img[obs_mask], self._pos[obs_mask])
@@ -146,6 +144,8 @@ class ImageEnvironment(VectorEnv):
 
 
 def test_env():
+    from matplotlib import pyplot as plt
+
     seed = 8041990
     ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
     env = ImageEnvironment(ds, num_envs=2, obs_hw_shape=8, seed=None)

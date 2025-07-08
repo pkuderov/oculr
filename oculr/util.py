@@ -89,7 +89,7 @@ def test_env_helpers():
     from oculr.dataset import Dataset
 
     seed = 8041990
-    ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
+    ds = Dataset('cifar', grayscale=False, lp_norm=None, seed=seed)
 
     print(ds.image_shape)
     print(get_pos_range((3, 10, 7), (10, 6)))

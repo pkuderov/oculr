@@ -73,7 +73,7 @@ def test_env_buffers():
     from oculr.dataset import Dataset
 
     seed = 8041990
-    ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
+    ds = Dataset('cifar', grayscale=False, lp_norm=None, seed=seed)
     img_buffer = ImageBuffer(
         ds.train.images, ds.train.targets, img_chw_shape=ds.image_shape,
         obs_chw_shape=get_obs_shape(ds.image_shape, ensure_2d(12))

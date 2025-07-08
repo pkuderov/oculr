@@ -13,7 +13,8 @@ class ImageEnvironment(VectorEnv):
     def __init__(
             self, ds: Dataset, *, num_envs, obs_hw_shape=1, max_time_steps=3, seed=None,
             step_reward=0., answer_reward=(1.0, -1.0),
-            is_eval=False, img_buffer_fn=ImageBuffer
+            is_eval=False, img_buffer_fn=ImageBuffer,
+            termination_policy='first_guess'
     ):
         super().__init__()
         self.rng = np.random.default_rng(seed)
@@ -43,7 +44,16 @@ class ImageEnvironment(VectorEnv):
             seed=seed
         )
 
-        self._step = None
+        # first_guess | until_correct
+        self.term_policy = termination_policy
+        if self.term_policy == 'first_guess':
+            self._step_impl = self.step_first_guess
+        elif self.term_policy == 'until_correct':
+            self._step_impl = self.step_until_correct
+        else:
+            raise ValueError(self.term_policy)
+
+        self._timestep = None
         self._pos = None
         self._ixs = np.empty(self.bsz, dtype=int)
         self._img = np.empty((self.bsz, *self.data.images.shape[1:]), dtype=float)
@@ -52,7 +62,7 @@ class ImageEnvironment(VectorEnv):
         self._done_mask = None
 
     def reset(self, **kwargs):
-        self._step = np.zeros(self.bsz, dtype=int)
+        self._timestep = np.zeros(self.bsz, dtype=int)
         self._ixs[:], self._img[:], self._th[:], self._tar[:] = self.data.sample(self.bsz)
 
         # since on the episode reset an initial obs is thumbnail and position
@@ -66,6 +76,9 @@ class ImageEnvironment(VectorEnv):
         return (oh_pos, obs), {}
 
     def step(self, action):
+        return self._step_impl(action)
+
+    def step_first_guess(self, action):
         # action: (BSZ, 4): what(zoom out|move|answer), n_classes, n_H_pos, n_W_pos
         assert action.shape == (self.bsz, 4)
         zma = action[..., 0]
@@ -75,10 +88,10 @@ class ImageEnvironment(VectorEnv):
         reset_mask = self._done_mask
         n_reset = np.count_nonzero(reset_mask)
 
-        self._step += 1
+        self._timestep += 1
         if n_reset > 0:
             # reset what is resetting
-            self._step[reset_mask] = 0
+            self._timestep[reset_mask] = 0
             (
                 self._ixs[reset_mask], self._img[reset_mask],
                 self._th[reset_mask], self._tar[reset_mask]
@@ -88,13 +101,13 @@ class ImageEnvironment(VectorEnv):
         zoom_mask, move_mask, answer_mask = self._split_what_action(zma, reset_mask)
 
         # resetting do not interfere with both flags
-        truncated = self._step >= self.max_time_steps
+        truncated = self._timestep >= self.max_time_steps
         terminated = answer_mask
         done_mask = np.logical_or(terminated, truncated)
         self._done_mask = done_mask
 
         n_done = np.count_nonzero(done_mask)
-        ep_len_sum = 0 if n_done == 0 else self._step[done_mask].sum()
+        ep_len_sum = 0 if n_done == 0 else self._timestep[done_mask].sum()
 
         # 1. Handle answering (=guessing the image class)
         #   fill with default step penalty
@@ -107,6 +120,79 @@ class ImageEnvironment(VectorEnv):
         #   fill correct answers
         correct_mask = np.logical_and(answer_mask, action[..., 1] == self._tar)
         reward[correct_mask] = self.answer_reward[0]
+        n_correct = 0 if n_done == 0 else np.count_nonzero(correct_mask)
+
+        # 2. Handle moving. NB: resetting items inherit old pos from prev episode,
+        #    but it's ok since new pos should be selected before being exposed to agent
+        self._pos[move_mask] = action[..., 2:][move_mask]
+
+        # what to show: patch or zoomed-out-image (aka thumbnail)
+        thumbnail_mask = np.logical_or(zoom_mask, reset_mask)
+        patch_mask = np.logical_not(thumbnail_mask)
+
+        # encode position (+ is zoomed out mask)
+        oh_pos = to_one_hot_pos(self._pos, self.pos_range, thumbnail_mask)
+
+        # fill observation
+        obs = np.empty((self.bsz, self.obs_size), float)
+        obs[thumbnail_mask] = self._th[thumbnail_mask]
+        obs[patch_mask] = self._get_obs(self._img[patch_mask], self._pos[patch_mask])
+
+        # careful: return only copied data (to avoid mutation problems)
+        return (
+            (oh_pos, obs),
+            reward, terminated, truncated,
+            dict(
+                reset_mask=reset_mask,
+                n_reset=n_reset,
+                n_done=n_done,
+                ep_len_sum=ep_len_sum,
+                n_correct=n_correct,
+            )
+        )
+
+    def step_until_correct(self, action):
+        # action: (BSZ, 4): what(zoom out|move|answer), n_classes, n_H_pos, n_W_pos
+        assert action.shape == (self.bsz, 4)
+        zma = action[..., 0]
+
+        # for resetting items the last selected action is ignored
+        # (since it's done from the terminal/truncated state)
+        reset_mask = self._done_mask
+        n_reset = np.count_nonzero(reset_mask)
+
+        self._timestep += 1
+        if n_reset > 0:
+            # reset what is resetting
+            self._timestep[reset_mask] = 0
+            (
+                self._ixs[reset_mask], self._img[reset_mask],
+                self._th[reset_mask], self._tar[reset_mask]
+            ) = self.data.sample(n_reset)
+
+        # NB: all three masks have resetting items excluded
+        zoom_mask, move_mask, answer_mask = self._split_what_action(zma, reset_mask)
+
+        # 1. Handle answering (=guessing the image class)
+        #   fill with default step penalty
+        reward = np.full(self.bsz, self.step_reward)
+        #   fill resetting items if needed
+        if n_reset > 0:
+            reward[reset_mask] = 0.0
+        #   fill answered with the default "incorrect answer" reward
+        reward[answer_mask] = self.answer_reward[1]
+        #   fill correct answers
+        correct_mask = np.logical_and(answer_mask, action[..., 1] == self._tar)
+        reward[correct_mask] = self.answer_reward[0]
+
+        # resetting do not interfere with both flags
+        truncated = self._timestep >= self.max_time_steps
+        terminated = correct_mask
+        done_mask = np.logical_or(terminated, truncated)
+        self._done_mask = done_mask
+
+        n_done = np.count_nonzero(done_mask)
+        ep_len_sum = 0 if n_done == 0 else self._timestep[done_mask].sum()
         n_correct = 0 if n_done == 0 else np.count_nonzero(correct_mask)
 
         # 2. Handle moving. NB: resetting items inherit old pos from prev episode,
@@ -156,7 +242,7 @@ def test_env():
     from matplotlib import pyplot as plt
 
     seed = 8041990
-    ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
+    ds = Dataset('cifar', grayscale=False, lp_norm=None, seed=seed)
     env = ImageEnvironment(ds, num_envs=2, obs_hw_shape=8, seed=None)
     o, info = env.reset()
 
@@ -180,7 +266,7 @@ def test_env():
 
 def benchmark_env():
     seed = 8041990
-    ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
+    ds = Dataset('cifar', grayscale=False, lp_norm=None, seed=seed)
     env = ImageEnvironment(
         ds, num_envs=64, obs_hw_shape=7, max_time_steps=20, seed=42,
         answer_reward=(1.0, -0.3), step_reward=-0.01,

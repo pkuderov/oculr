@@ -51,9 +51,9 @@ class Dataset:
     # sds: Sds
 
     def __init__(
-            self, seed: int, ds: str = 'mnist', grayscale: bool = True,
+            self, ds: str = 'mnist', grayscale: bool = True,
             center: bool | str = False, lp_norm: int = None, elementwise_norm: bool = False,
-            debug: bool = False
+            debug: bool = False, seed: int | None = None,
     ):
         if ds != 'cifar':
             grayscale = True
@@ -61,7 +61,9 @@ class Dataset:
         self.name = ds
         self.grayscale = grayscale
         image_shape, train, test = _load_dataset(
-            seed, ds, grayscale=grayscale, lp_norm=lp_norm, debug=debug
+            ds, grayscale=grayscale,
+            center=center, lp_norm=lp_norm, elementwise_norm=elementwise_norm,
+            debug=debug, seed=seed
         )
 
         self.train = DatasetSplit(*train, image_shape)
@@ -83,9 +85,9 @@ class Dataset:
 
 
 def _load_dataset(
-        seed: int, ds_name: str, test_size: int | float = 10_000, grayscale: bool = True,
+        ds_name: str, test_size: int | float = 10_000, grayscale: bool = True,
         center: bool | str = False, lp_norm: int = None, elementwise_norm: bool = False,
-        debug: bool = False
+        debug: bool = False, seed: int = None,
 ):
     # normalize the images [0, 255] -> [0, 1]
     normalizer = 255.0

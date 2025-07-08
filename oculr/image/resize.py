@@ -154,7 +154,7 @@ def test_image_resize():
     from oculr.dataset import Dataset, to_plottable
 
     seed = 8041990
-    ds = Dataset(seed, 'cifar', grayscale=False, lp_norm=None)
+    ds = Dataset('cifar', grayscale=False, lp_norm=None, seed=seed)
 
     sz = 8
     rng = np.random.default_rng()

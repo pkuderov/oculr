@@ -40,7 +40,7 @@ def plot_patches(patches, orig_shape):
 
 def _test_mnist():
     seed = 8041990
-    ds = Dataset(seed, 'mnist', grayscale=False, lp_norm=None, debug=True)
+    ds = Dataset('mnist', grayscale=False, lp_norm=None, debug=True, seed=seed)
     kernel_configs = dict(mnist=(14, 7), cifar=(16, 8))
     ksz, kst = kernel_configs[ds.name]
     print(ksz, kst)

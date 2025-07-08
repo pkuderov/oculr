@@ -25,13 +25,16 @@ class DatasetSplit:
         return len(self.targets)
 
     @property
-    def n_classes(self):
+    def n_classes(self) -> int:
         return 10
 
     @property
     def classes(self):
         if self._classes is None:
-            self._classes = [np.flatnonzero(self.targets == i) for i in range(self.n_classes)]
+            self._classes = [
+                np.flatnonzero(self.targets == i)
+                for i in range(self.n_classes)
+            ]
         return self._classes
 
     @property
@@ -49,7 +52,8 @@ class Dataset:
 
     def __init__(
             self, seed: int, ds: str = 'mnist', grayscale: bool = True,
-            lp_norm: int = None, debug: bool = False
+            center: bool | str = False, lp_norm: int = None, elementwise_norm: bool = False,
+            debug: bool = False
     ):
         if ds != 'cifar':
             grayscale = True
@@ -66,11 +70,11 @@ class Dataset:
         self.n_channels = self.image_shape[0]
 
     @property
-    def n_classes(self):
+    def n_classes(self) -> int:
         return 10
 
     @property
-    def image_shape(self):
+    def image_shape(self) -> tuple[int]:
         return self.train.image_shape
 
     @property
@@ -79,8 +83,9 @@ class Dataset:
 
 
 def _load_dataset(
-        seed: int, ds_name: str, test_size: int | float = 10_000,
-        grayscale: bool = True, lp_norm: int = None, debug: bool = False
+        seed: int, ds_name: str, test_size: int | float = 10_000, grayscale: bool = True,
+        center: bool | str = False, lp_norm: int = None, elementwise_norm: bool = False,
+        debug: bool = False
 ):
     # normalize the images [0, 255] -> [0, 1]
     normalizer = 255.0
@@ -114,14 +119,21 @@ def _load_dataset(
         with cache_path.open('wb') as f:
             pickle.dump({'images': images, 'targets': targets}, f)
 
+    if center == 'image':
+        # subtract avg image
+        images -= images.mean(0, keepdims=True)
+    elif center == 'pixel':
+        # subtract avg pixel
+        images -= images.mean()
+
     # normalize
     if lp_norm is not None:
-        if lp_norm > 0:
+        if elementwise_norm:
+            # normalize each image independently
             images /= np.linalg.norm(images, ord=lp_norm, axis=-1, keepdims=True)
-        elif lp_norm == 0:
-            images -= images.mean(0, keepdims=True)
-        elif lp_norm < 0:
-            images /= np.linalg.norm(images, ord=-lp_norm, axis=-1).mean()
+        else:
+            # rescale by an average norm
+            images /= np.linalg.norm(images, ord=lp_norm, axis=-1).mean()
 
     shapes = dict(mnist=(28, 28), cifar=(32, 32))
     shape = [3] if not grayscale and ds_name == 'cifar' else [1]

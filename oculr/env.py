@@ -96,7 +96,7 @@ class ImageEnvironment(VectorEnv):
         n_done = np.count_nonzero(done_mask)
         ep_len_sum = 0 if n_done == 0 else self._step[done_mask].sum()
 
-        # 1. Handle guessing
+        # 1. Handle answering (=guessing the image class)
         #   fill with default step penalty
         reward = np.full(self.bsz, self.step_reward)
         #   fill resetting items if needed
@@ -148,7 +148,7 @@ class ImageEnvironment(VectorEnv):
     def _split_what_action(action, reset_mask):
         a = action.copy()
         a[reset_mask] = -1
-        # zoom_mask, move_mask, guess_mask
+        # zoom_mask, move_mask, answer_mask
         return a == 0, a == 1, a == 2
 
 

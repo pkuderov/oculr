@@ -1,5 +1,6 @@
 from functools import partial
 
+import gymnasium
 import numpy as np
 from gymnasium.vector import VectorEnv
 
@@ -60,6 +61,31 @@ class ImageEnvironment(VectorEnv):
         self._th = np.empty((self.bsz, *self.data.thumbnails.shape[1:]), dtype=float)
         self._tar = np.empty(self.bsz, dtype=int)
         self._done_mask = None
+
+        action_box = [3, self.n_classes, *self.pos_range[1]]
+        action_box = np.array(action_box, dtype=int).tolist()
+
+        action_description = [
+            'action_type', 'image_classes', 'x_pos', 'y_pos'
+        ]
+        action_description = list(zip(action_box, action_description))
+
+        # compliance to gymnasium interface
+        self.single_observation_space = gymnasium.spaces.Box(
+            0.0, 1.0, (self.total_obs_size, )
+        )
+        self.single_action_space = gymnasium.spaces.MultiDiscrete(
+            action_box, dtype=int, seed=self.rng
+        )
+
+        self.observation_space = gymnasium.vector.utils.batch_space(
+            self.single_observation_space, self.num_envs
+        )
+        self.action_space = gymnasium.vector.utils.batch_space(
+            self.single_action_space, self.num_envs
+        )
+        self.metadata['autoreset_mode'] = gymnasium.vector.AutoresetMode.NEXT_STEP
+        self.metadata['action_space_description'] = action_description
 
     def reset(self, **kwargs):
         self._timestep = np.zeros(self.bsz, dtype=int)

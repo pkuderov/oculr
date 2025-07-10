@@ -10,9 +10,9 @@ license = { file = "LICENSE" }
 requires-python = ">=3.9"
 
 dependencies = [
-    "numpy >=1.23, <2.0",
+    "numpy >=1.23",
     "numba >=0.57",
-    "gymnasium >= 1.1",
+    "gymnasium[array-api] >= 1.1",
     "scikit-learn",
 ]
 

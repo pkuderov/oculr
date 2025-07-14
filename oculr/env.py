@@ -34,7 +34,8 @@ class ImageEnvironment(VectorEnv):
 
         # total obs vector: <is zoomed out + flatten position 2-hot> + <flatten obs image chw>
         self.obs_size = np.prod(self.obs_chw_shape)
-        self.total_obs_size = 1 + self.pos_range[1].sum() + self.obs_size
+        self.pos_enc_size = 1 + self.pos_range[1].sum()
+        self.total_obs_size = self.pos_enc_size + self.obs_size
 
         self.is_eval = is_eval
         data = ds.test if is_eval else ds.train
@@ -65,15 +66,17 @@ class ImageEnvironment(VectorEnv):
         action_box = [3, self.n_classes, *self.pos_range[1]]
         action_box = np.array(action_box, dtype=int).tolist()
 
-        action_description = [
+        action_names = [
             'action_type', 'image_classes', 'x_pos', 'y_pos'
         ]
-        action_description = list(zip(action_box, action_description))
+        action_description = list(zip(action_box, action_names))
 
         # compliance to gymnasium interface
-        self.single_observation_space = gymnasium.spaces.Box(
-            0.0, 1.0, (self.total_obs_size, )
-        )
+        # TODO: switch to dict obs and actions
+        self.single_observation_space = gymnasium.spaces.Tuple((
+            gymnasium.spaces.Box(0.0, 1.0, (self.pos_enc_size,)),
+            gymnasium.spaces.Box(0.0, 1.0, (self.obs_size, ))
+        ))
         self.single_action_space = gymnasium.spaces.MultiDiscrete(
             action_box, dtype=int, seed=self.rng
         )
@@ -86,6 +89,8 @@ class ImageEnvironment(VectorEnv):
         )
         self.metadata['autoreset_mode'] = gymnasium.vector.AutoresetMode.NEXT_STEP
         self.metadata['action_space_description'] = action_description
+        self.metadata['action_box'] = action_box
+        self.metadata['action_names'] = action_names
 
     def reset(self, **kwargs):
         self._timestep = np.zeros(self.bsz, dtype=int)

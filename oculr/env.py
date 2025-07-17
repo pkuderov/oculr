@@ -1,3 +1,4 @@
+from enum import IntEnum, auto
 from functools import partial
 
 import gymnasium
@@ -10,12 +11,21 @@ from oculr.timer import timer
 from oculr.util import get_obs_shape, get_pos_range, get_obs, to_one_hot_pos, ensure_2d
 
 
+class ActionTypes(IntEnum):
+    ZOOM = 0
+    MOVE = auto()
+    ANSWER = auto()
+
+
+
 class ImageEnvironment(VectorEnv):
     def __init__(
-            self, ds: Dataset, *, num_envs, obs_hw_shape=1, max_time_steps=3, seed=None,
+            self, ds: Dataset, *, num_envs, obs_hw_shape=1, max_time_steps=3,
+            seed=None,
             step_reward=0., answer_reward=(1.0, -1.0),
-            is_eval=False, img_buffer_fn=ImageBuffer,
-            termination_policy='first_guess'
+            is_eval: bool = False, img_buffer_fn=ImageBuffer,
+            termination_policy: str = 'first_guess',
+            reset_as_step: bool = False,
     ):
         super().__init__()
         self.rng = np.random.default_rng(seed)
@@ -55,6 +65,8 @@ class ImageEnvironment(VectorEnv):
         else:
             raise ValueError(self.term_policy)
 
+        self.use_step_api_for_reset = reset_as_step
+
         self._timestep = None
         self._pos = None
         self._ixs = np.empty(self.bsz, dtype=int)
@@ -70,6 +82,11 @@ class ImageEnvironment(VectorEnv):
             'action_type', 'image_classes', 'x_pos', 'y_pos'
         ]
         action_description = list(zip(action_box, action_names))
+        action_types_description = dict(
+            zoom=int(ActionTypes.ZOOM),
+            move=int(ActionTypes.MOVE),
+            answer=int(ActionTypes.ANSWER)
+        )
 
         # compliance to gymnasium interface
         # TODO: switch to dict obs and actions
@@ -91,6 +108,7 @@ class ImageEnvironment(VectorEnv):
         self.metadata['action_space_description'] = action_description
         self.metadata['action_box'] = action_box
         self.metadata['action_names'] = action_names
+        self.metadata['action_types_description'] = action_types_description
 
     def reset(self, **kwargs):
         self._timestep = np.zeros(self.bsz, dtype=int)
@@ -104,7 +122,21 @@ class ImageEnvironment(VectorEnv):
         oh_pos = to_one_hot_pos(self._pos, self.pos_range, is_hidden=self._done_mask)
         obs = self._th.copy()
 
-        return (oh_pos, obs), {}
+        info = {}
+        if self.use_step_api_for_reset:
+            reward = np.zeros(self.bsz)
+            terminated = np.zeros_like(reward, dtype=bool)
+            info |= dict(
+                reward=reward, terminated=terminated,
+                truncated=terminated.copy(),
+                reset_mask=np.logical_not(terminated),
+                n_reset=0,
+                n_done=0,
+                ep_len_sum=0,
+                n_correct=0,
+            )
+
+        return (oh_pos, obs), info
 
     def step(self, action):
         return self._step_impl(action)
@@ -265,8 +297,11 @@ class ImageEnvironment(VectorEnv):
     def _split_what_action(action, reset_mask):
         a = action.copy()
         a[reset_mask] = -1
-        # zoom_mask, move_mask, answer_mask
-        return a == 0, a == 1, a == 2
+        # zma: zoom_mask, move_mask, answer_mask
+        zoom = a == ActionTypes.ZOOM
+        move = a == ActionTypes.MOVE
+        answer = a == ActionTypes.ANSWER
+        return zoom, move, answer
 
 
 def test_env():

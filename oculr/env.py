@@ -17,12 +17,11 @@ class ActionTypes(IntEnum):
     ANSWER = auto()
 
 
-
 class ImageEnvironment(VectorEnv):
     def __init__(
             self, ds: Dataset, *, num_envs, obs_hw_shape=1, max_time_steps=3,
             seed=None,
-            step_reward=0., answer_reward=(1.0, -1.0),
+            step_reward=0., answer_reward=(1.0, -1.0), zoom_reward=0.0, move_reward=0.0,
             is_eval: bool = False, img_buffer_fn=ImageBuffer,
             termination_policy: str = 'first_guess',
             reset_as_step: bool = False,
@@ -36,6 +35,8 @@ class ImageEnvironment(VectorEnv):
         self.step_reward = step_reward
         # tuple (correct, incorrect)
         self.answer_reward = answer_reward
+        self.zoom_reward = zoom_reward
+        self.move_reward = move_reward
 
         self.img_chw_shape = ds.image_shape
         self.obs_hw_shape = ensure_2d(obs_hw_shape)
@@ -182,8 +183,10 @@ class ImageEnvironment(VectorEnv):
         reward[answer_mask] = self.answer_reward[1]
         #   fill correct answers
         correct_mask = np.logical_and(answer_mask, action[..., 1] == self._tar)
-        reward[correct_mask] = self.answer_reward[0]
         n_correct = 0 if n_done == 0 else np.count_nonzero(correct_mask)
+        reward[correct_mask] = self.answer_reward[0]
+        reward[move_mask] += self.move_reward
+        reward[zoom_mask] += self.zoom_reward
 
         # 2. Handle moving. NB: resetting items inherit old pos from prev episode,
         #    but it's ok since new pos should be selected before being exposed to agent
@@ -191,6 +194,7 @@ class ImageEnvironment(VectorEnv):
 
         # what to show: patch or zoomed-out-image (aka thumbnail)
         thumbnail_mask = np.logical_or(zoom_mask, reset_mask)
+        # thumbnail_mask = reset_mask
         patch_mask = np.logical_not(thumbnail_mask)
 
         # encode position (+ is zoomed out mask)
